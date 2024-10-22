@@ -98,13 +98,13 @@ echo "Extracting the dlkm kernel modules"
 out=$extract_out/vendor_dlkm
 
 echo "Extracting at $out"
-fsck.erofs --extract="$out" $(get_path vendor_dlkm.img)
+fsck.erofs --extract $(get_path vendor_dlkm.img)
 
 echo "Done. Extracting the vendor dlkm"
 
 echo "Copying all vendor dlkm modules"
 for module in $(find $out/lib -name "*.ko" -o -name "modules.load*" -o -name "modules.blocklist"); do
-	cp $module ./modules/vendor_dlkm/
+    cp $module ./modules/vendor_dlkm/
 done
 
 # SYSTEM_DLKM
@@ -112,12 +112,13 @@ echo "Extracting the dlkm kernel modules"
 out=$extract_out/system_dlkm
 
 echo "Extracting at $out"
-fsck.erofs --extract="$out" $(get_path system_dlkm.img)
+fsck.erofs --extract $(get_path system_dlkm.img)
 
 echo "Done. Extracting the system dlkm"
 
 echo "Copying all system dlkm modules"
 cp -r $out/lib/modules/6.1* ./modules/system_dlkm/
+
 
 # Extract DTBO and DTBs
 echo "Extracting DTBO and DTBs"
