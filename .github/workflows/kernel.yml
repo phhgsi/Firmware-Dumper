@@ -9,6 +9,7 @@ on:
 
 env:
   LINK: ${{ github.event.inputs.link }}
+  File: ${{ github.event.inputs.File }}
   TZ: Asia/Kolkata
 
 jobs:
@@ -25,7 +26,7 @@ jobs:
              git clone https://github.com/LineageOS/android_prebuilts_extract-tools.git extract
              git clone https://git.codelinaro.org/clo/la/platform/system/libufdt.git
              git clone https://github.com/jbeich/platform_system_tools_mkbootimg.git mkbootimg
-
+             wget $LINK
       - name: SettingUp SSH Keys
         run: |
              mkdir -p ~/.ssh
@@ -42,7 +43,7 @@ jobs:
         run: |
              wget https://raw.githubusercontent.com/phhgsi/Firmware-Dumper/refs/heads/master/extract-files.sh
              chmod u+x extract-files.sh
-             ./extract-files.sh 
+             ./extract-files.sh $File
       - name: Firmware is Dumping
         run: |
              cd dumper
