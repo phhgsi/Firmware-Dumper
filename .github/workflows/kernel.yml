@@ -12,6 +12,17 @@ env:
   File: ${{ github.event.inputs.File }}
   TZ: Asia/Kolkata
 
+on:
+  workflow_dispatch:
+    inputs:
+      link:
+        description: 'Firmware file'
+        required: true
+
+env:
+  File: ${{ github.event.inputs.File }}
+  TZ: Asia/Kolkata
+
 jobs:
   Firmware-Dump:
       runs-on: ubuntu-22.04
