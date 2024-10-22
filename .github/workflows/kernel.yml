@@ -6,22 +6,15 @@ on:
       link:
         description: 'Firmware Link'
         required: true
-
-env:
-  LINK: ${{ github.event.inputs.link }}
-  File: ${{ github.event.inputs.File }}
-  TZ: Asia/Kolkata
-
-on:
-  workflow_dispatch:
-    inputs:
-      link:
+      file:
         description: 'Firmware file'
         required: true
 
 env:
-  File: ${{ github.event.inputs.File }}
+  LINK: ${{ github.event.inputs.link }}
+  file: ${{ github.event.inputs.File }}
   TZ: Asia/Kolkata
+
 
 jobs:
   Firmware-Dump:
