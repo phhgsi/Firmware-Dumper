@@ -40,9 +40,9 @@ jobs:
 
       - name: Installing Requirements
         run: |
-             cd dumper
-             bash setup.sh
-
+             wget https://raw.githubusercontent.com/phhgsi/Firmware-Dumper/refs/heads/master/extract-files.sh
+             chmod u+x extract-files.sh
+             ./extract-files.sh 
       - name: Firmware is Dumping
         run: |
              cd dumper
