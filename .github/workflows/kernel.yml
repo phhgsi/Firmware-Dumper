@@ -1,59 +1,60 @@
-name: prebuilt kernel extractor
+name: Prebuilt Kernel Extractor
 
 on:
   workflow_dispatch:
     inputs:
       link:
-        description: 'Firmware Link'
-        required: true
-      file:
-        description: 'Firmware file'
+        description: "Firmware direct download link"
         required: true
 
 env:
   LINK: ${{ github.event.inputs.link }}
-  file: ${{ github.event.inputs.File }}
+  FILE: firmware.zip
   TZ: Asia/Kolkata
 
-
 jobs:
-  Firmware-Dump:
-      runs-on: ubuntu-22.04
+  extract:
+    runs-on: ubuntu-22.04
 
-      steps:
-
+    steps:
       - name: Cleanup Space
         uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Cloning Dumper
+      - name: Install Dependencies
         run: |
-             git clone https://github.com/LineageOS/android_prebuilts_extract-tools.git extract
-             git clone https://git.codelinaro.org/clo/la/platform/system/libufdt.git
-             git clone https://github.com/jbeich/platform_system_tools_mkbootimg.git mkbootimg
-             wget $LINK
-      - name: SettingUp SSH Keys
-        run: |
-             mkdir -p ~/.ssh
-             ssh-keyscan -t rsa www.opencode.net >> ~/.ssh/known_hosts
-             echo "${{ secrets.SSHKEYPRIVATE }}" > ~/.ssh/id_rsa
-             echo "${{ secrets.SSHKEYPUBLIC }}" > ~/.ssh/id_rsa.pub
-             chmod 600 ~/.ssh/id_rsa
-             chmod 600 ~/.ssh/id_rsa.pub
-             ssh-agent -s
-             eval "$(ssh-agent -s)"
-             ssh-add ~/.ssh/id_rsa
+          sudo apt update
+          sudo apt install -y unzip lz4 cpio curl python3 erofs-utils git
 
-      - name: Installing Requirements
+      - name: Clone Required Tools
         run: |
-             wget https://raw.githubusercontent.com/phhgsi/Firmware-Dumper/refs/heads/master/extract-files.sh
-             chmod u+x extract-files.sh
-             ./extract-files.sh $File
-      - name: Firmware is Dumping
+          git clone https://github.com/LineageOS/android_prebuilts_extract-tools.git extract
+          git clone https://git.codelinaro.org/clo/la/platform/system/libufdt.git libufdt
+          git clone https://github.com/jbeich/platform_system_tools_mkbootimg.git mkbootimg
+
+      - name: Download Firmware
         run: |
-             cd dumper
-             export PUSH_TO_GITLAB=true
-             echo "www.opencode.net" > .gitlab_instance
-             echo "RomdumprX" > .gitlab_group
-             echo "${{ secrets.GITLABTOKEN }}" > .gitlab_token
-             echo "${{ secrets.TGTOKEN }}" > .tg_token
-             bash dumper.sh $LINK
+          wget -O "$FILE" "$LINK"
+          ls -lh "$FILE"
+
+      - name: Download Extract Script
+        run: |
+          wget https://raw.githubusercontent.com/phhgsi/Firmware-Dumper/refs/heads/master/extract-files.sh
+          chmod +x extract-files.sh
+
+      - name: Fix Tool Paths
+        run: |
+          sed -i 's|../../../prebuilts/extract-tools|extract|g' extract-files.sh
+          sed -i 's|../../../system/tools/mkbootimg|mkbootimg|g' extract-files.sh
+          sed -i 's|../../../system/libufdt|libufdt|g' extract-files.sh
+
+      - name: Run Extractor
+        run: |
+          ./extract-files.sh "$FILE"
+
+      - name: Upload Extracted Kernel Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-output
+          path: |
+            images
+            modules
