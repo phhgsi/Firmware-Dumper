@@ -49,6 +49,7 @@ jobs:
 
       - name: Run Extractor
         run: |
+          sudo apt install erofs-utils
           ./extract-files.sh "$FILE"
 
       - name: Upload Extracted Kernel Files
