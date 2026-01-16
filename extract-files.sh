@@ -2,9 +2,9 @@
 
 set -e
 
-EXTRACT_OTA=./extract/linux-x86/bin/ota_extractor
-MKDTBOIMG=./libufdt/utils/src/mkdtboimg.py
-UNPACKBOOTIMG=./mkbootimg/unpack_bootimg.py
+EXTRACT_OTA=../../../prebuilts/extract-tools/linux-x86/bin/ota_extractor
+MKDTBOIMG=../../../system/libufdt/utils/src/mkdtboimg.py
+UNPACKBOOTIMG=../../../system/tools/mkbootimg/unpack_bootimg.py
 ROM_ZIP=$1
 
 error_handler() {
@@ -98,13 +98,13 @@ echo "Extracting the dlkm kernel modules"
 out=$extract_out/vendor_dlkm
 
 echo "Extracting at $out"
-fsck.erofs --extract $(get_path vendor_dlkm.img)
+fsck.erofs --extract="$out" $(get_path vendor_dlkm.img)
 
 echo "Done. Extracting the vendor dlkm"
 
 echo "Copying all vendor dlkm modules"
 for module in $(find $out/lib -name "*.ko" -o -name "modules.load*" -o -name "modules.blocklist"); do
-    cp $module ./modules/vendor_dlkm/
+	cp $module ./modules/vendor_dlkm/
 done
 
 # SYSTEM_DLKM
@@ -112,13 +112,12 @@ echo "Extracting the dlkm kernel modules"
 out=$extract_out/system_dlkm
 
 echo "Extracting at $out"
-fsck.erofs --extract $(get_path system_dlkm.img)
+fsck.erofs --extract="$out" $(get_path system_dlkm.img)
 
 echo "Done. Extracting the system dlkm"
 
 echo "Copying all system dlkm modules"
 cp -r $out/lib/modules/6.1* ./modules/system_dlkm/
-
 
 # Extract DTBO and DTBs
 echo "Extracting DTBO and DTBs"
@@ -134,6 +133,12 @@ find "${extract_out}/dtbs" -type f -name "*.dtb" \
 
 cp -f "${extract_out}/dtbo.img" ./images/dtbo.img
 echo "Done"
+
+# Add touch modules to vendorboot for recovery
+for module in xiaomi_touch.ko goodix_core.ko focaltech_touch.ko; do
+    cp modules/vendor_dlkm/$module modules/vendor_boot/
+    echo $module >> modules/vendor_boot/modules.load.recovery
+done
 
 rm -rf $extract_out
 echo "Extracted files successfully"
