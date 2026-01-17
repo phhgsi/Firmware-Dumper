@@ -3,7 +3,7 @@
 set -e
 
 EXTRACT_OTA=../../../prebuilts/extract-tools/linux-x86/bin/ota_extractor
-EXTRACT_EROFS=../../../prebuilts/erofs-utils/linux-x86/bin/extract.erofs
+EXTRACT_EROFS=$(which dump.erofs)
 MKDTBOIMG=../../../system/libufdt/utils/src/mkdtboimg.py
 UNPACKBOOTIMG=../../../system/tools/mkbootimg/unpack_bootimg.py
 ROM_ZIP=$1
@@ -106,7 +106,7 @@ out="$extract_out/vendor_dlkm"
 mkdir -p "$out"
 
 echo "Extracting at $out"
-"$EXTRACT_EROFS" -i "$(get_path vendor_dlkm.img)" -o "$out"
+"$EXTRACT_EROFS" -i "$(get_path vendor_dlkm.img)" -o "$out" -x
 
 echo "Done. Extracting the vendor dlkm"
 
@@ -121,7 +121,7 @@ out="$extract_out/system_dlkm"
 mkdir -p "$out"
 
 echo "Extracting at $out"
-"$EXTRACT_EROFS" -i "$(get_path system_dlkm.img)" -o "$out"
+"$EXTRACT_EROFS" -i "$(get_path system_dlkm.img)" -o "$out" -x
 
 echo "Done. Extracting the system dlkm"
 
