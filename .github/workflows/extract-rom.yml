@@ -1,0 +1,345 @@
+name: Extract ROM Files
+
+on:
+  workflow_dispatch:
+    inputs:
+      rom_url:
+        description: 'ROM ZIP download URL'
+        required: true
+        type: string
+      device_name:
+        description: 'Device name (for artifact naming)'
+        required: true
+        type: string
+
+jobs:
+  extract:
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-protobuf \
+            unzip \
+            cpio \
+            liblz4-tool \
+            curl \
+            git \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            uuid-dev \
+            liblz4-dev \
+            libzstd-dev
+      
+      - name: Install Python dependencies
+        run: |
+          pip3 install --upgrade pip
+          pip3 install protobuf pycryptodome
+      
+      - name: Build and install erofs-utils
+        run: |
+          git clone https://git.kernel.org/pub/scm/linux/kernel/git/xiang/erofs-utils.git
+          cd erofs-utils
+          ./autogen.sh
+          ./configure --prefix=/usr
+          make -j$(nproc)
+          sudo make install
+          # Verify installation
+          which extract.erofs
+          extract.erofs --help || true
+          cd ..
+          rm -rf erofs-utils
+      
+      - name: Download mkbootimg tools
+        run: |
+          mkdir -p tools
+          cd tools
+          
+          # Download unpack_bootimg.py
+          curl -sSL "https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/lineage-21.0/unpack_bootimg.py" -o unpack_bootimg.py
+          chmod +x unpack_bootimg.py
+          
+          # Download mkdtboimg.py
+          curl -sSL "https://raw.githubusercontent.com/LineageOS/android_system_libufdt/lineage-21.0/utils/src/mkdtboimg.py" -o mkdtboimg.py
+          chmod +x mkdtboimg.py
+          
+          cd ..
+      
+      - name: Download payload_dumper
+        run: |
+          mkdir -p tools
+          cd tools
+          
+          # Download payload_dumper and dependencies
+          curl -sSL "https://raw.githubusercontent.com/vm03/payload_dumper/master/payload_dumper.py" -o payload_dumper.py
+          curl -sSL "https://raw.githubusercontent.com/vm03/payload_dumper/master/update_metadata_pb2.py" -o update_metadata_pb2.py
+          
+          # Download extract-dtb
+          curl -sSL "https://raw.githubusercontent.com/PabloCastellano/extract-dtb/master/extract_dtb/extract_dtb.py" -o extract_dtb.py
+          
+          chmod +x *.py
+          cd ..
+      
+      - name: Download ROM firmware
+        run: |
+          echo "Downloading ROM from ${{ github.event.inputs.rom_url }}"
+          wget --progress=dot:giga -O firmware.zip "${{ github.event.inputs.rom_url }}"
+          ls -lh firmware.zip
+      
+      - name: Create extraction script
+        run: |
+          cat > extract-files.sh << 'SCRIPT_EOF'
+#!/bin/bash
+
+set -e
+
+ROM_ZIP=$1
+
+error_handler() {
+    if [[ -d $extract_out ]]; then
+        echo "Error detected, cleaning temporal working directory $extract_out"
+        rm -rf "$extract_out"
+    fi
+}
+
+trap error_handler ERR
+
+function usage() {
+    echo "Usage: ./extract-files.sh <rom-zip>"
+    exit 1
+}
+
+function get_path() {
+    echo "$extract_out/$1"
+}
+
+# Tool checks
+if [[ -z $ROM_ZIP ]] || [[ ! -f $ROM_ZIP ]]; then
+    usage
+fi
+
+if [[ ! -f tools/unpack_bootimg.py ]]; then
+    echo "Missing tools/unpack_bootimg.py"
+    exit 1
+fi
+
+if ! command -v extract.erofs &> /dev/null; then
+    echo "Missing extract.erofs"
+    exit 1
+fi
+
+# Clean and create needed directories
+for dir in ./modules/vendor_dlkm ./modules/system_dlkm ./modules/vendor_boot ./images ./images/dtbs; do
+    rm -rf "$dir"
+    mkdir -p "$dir"
+done
+
+# Extract the OTA package
+extract_out=$(mktemp -d)
+echo "Using $extract_out as working directory"
+
+echo "========================================="
+echo "Extracting the payload from $ROM_ZIP"
+echo "========================================="
+unzip -q "$ROM_ZIP" payload.bin -d "$extract_out" || {
+    echo "Failed to extract payload.bin from ROM"
+    exit 1
+}
+
+echo "========================================="
+echo "Extracting OTA images using payload_dumper"
+echo "========================================="
+cd "$extract_out"
+python3 ../tools/payload_dumper.py payload.bin --out . --partitions boot,dtbo,vendor_boot,vendor_dlkm,system_dlkm 2>&1 | grep -v "^DEBUG"
+cd - > /dev/null
+
+# Verify extracted images
+for img in boot.img dtbo.img vendor_boot.img vendor_dlkm.img system_dlkm.img; do
+    if [[ ! -f "$extract_out/$img" ]]; then
+        echo "Warning: $img was not extracted"
+    else
+        echo "✓ $img extracted ($(du -h "$extract_out/$img" | cut -f1))"
+    fi
+done
+
+# BOOT
+if [[ -f "$extract_out/boot.img" ]]; then
+    echo "========================================="
+    echo "Extracting the kernel image from boot.img"
+    echo "========================================="
+    out="$extract_out/boot-out"
+    mkdir "$out"
+    
+    python3 tools/unpack_bootimg.py --boot_img "$extract_out/boot.img" --out "$out" --format mkbootimg
+    
+    if [[ -f "$out/kernel" ]]; then
+        cp "$out/kernel" ./images/kernel
+        echo "✓ Kernel extracted ($(du -h ./images/kernel | cut -f1))"
+    fi
+fi
+
+# VENDOR_BOOT
+if [[ -f "$extract_out/vendor_boot.img" ]]; then
+    echo "========================================="
+    echo "Extracting the ramdisk kernel modules and DTB"
+    echo "========================================="
+    out="$extract_out/vendor_boot-out"
+    mkdir "$out"
+    
+    python3 tools/unpack_bootimg.py --boot_img "$extract_out/vendor_boot.img" --out "$out" --format mkbootimg
+    
+    echo "Extracting the ramdisk"
+    mkdir "$out/ramdisk"
+    if [[ -f "$out/vendor_ramdisk00" ]]; then
+        unlz4 -c "$out/vendor_ramdisk00" > "$out/vendor_ramdisk"
+        cd "$out/ramdisk" && cpio -i -F "../vendor_ramdisk" &>/dev/null
+        cd - > /dev/null
+        
+        echo "Copying all ramdisk modules"
+        count=0
+        while IFS= read -r -d '' module; do
+            cp "$module" ./modules/vendor_boot/
+            ((count++))
+        done < <(find "$out/ramdisk" \( -name "*.ko" -o -name "modules.load*" -o -name "modules.blocklist" \) -print0)
+        echo "✓ Copied $count ramdisk module files"
+    fi
+    
+    # Extract DTBs
+    if [[ -f "$out/dtb" ]]; then
+        echo "Extracting DTBs from vendor_boot"
+        python3 tools/extract_dtb.py "$out/dtb" -o "$extract_out/dtbs" > /dev/null 2>&1 || true
+        dtb_count=0
+        while IFS= read -r -d '' dtb; do
+            cp "$dtb" ./images/dtbs/
+            echo "  ✓ $(basename "$dtb")"
+            ((dtb_count++))
+        done < <(find "$extract_out/dtbs" -type f -name "*.dtb" -print0 2>/dev/null)
+        if [[ $dtb_count -gt 0 ]]; then
+            echo "✓ Extracted $dtb_count DTB files"
+        fi
+    fi
+fi
+
+# VENDOR_DLKM
+if [[ -f "$extract_out/vendor_dlkm.img" ]]; then
+    echo "========================================="
+    echo "Extracting vendor_dlkm modules"
+    echo "========================================="
+    out="$extract_out/vendor_dlkm"
+    mkdir -p "$out"
+    
+    extract.erofs -i "$extract_out/vendor_dlkm.img" -o "$out" -x
+    
+    count=0
+    while IFS= read -r -d '' module; do
+        cp "$module" ./modules/vendor_dlkm/
+        ((count++))
+    done < <(find "$out" \( -name "*.ko" -o -name "modules.load*" -o -name "modules.blocklist" \) -print0 2>/dev/null)
+    echo "✓ Copied $count vendor_dlkm module files"
+fi
+
+# SYSTEM_DLKM
+if [[ -f "$extract_out/system_dlkm.img" ]]; then
+    echo "========================================="
+    echo "Extracting system_dlkm modules"
+    echo "========================================="
+    out="$extract_out/system_dlkm"
+    mkdir -p "$out"
+    
+    extract.erofs -i "$extract_out/system_dlkm.img" -o "$out" -x
+    
+    if [[ -d "$out/lib/modules" ]]; then
+        cp -r "$out/lib/modules"/6.1* ./modules/system_dlkm/ 2>/dev/null || true
+        cp -r "$out/lib/modules"/5.* ./modules/system_dlkm/ 2>/dev/null || true
+        count=$(find ./modules/system_dlkm/ -name "*.ko" 2>/dev/null | wc -l)
+        echo "✓ Copied system_dlkm modules ($count .ko files)"
+    fi
+fi
+
+# Copy DTBO
+if [[ -f "$extract_out/dtbo.img" ]]; then
+    cp -f "$extract_out/dtbo.img" ./images/dtbo.img
+    echo "✓ DTBO image copied ($(du -h ./images/dtbo.img | cut -f1))"
+fi
+
+# Add touch modules to vendor_boot for recovery
+echo "========================================="
+echo "Adding touch modules for recovery"
+echo "========================================="
+for module in xiaomi_touch.ko goodix_core.ko focaltech_touch.ko; do
+    if [[ -f ./modules/vendor_dlkm/"$module" ]]; then
+        cp "./modules/vendor_dlkm/$module" ./modules/vendor_boot/
+        echo "$module" >> ./modules/vendor_boot/modules.load.recovery
+        echo "✓ Added $module to recovery"
+    fi
+done
+
+rm -rf "$extract_out"
+echo "========================================="
+echo "Extraction completed successfully!"
+echo "========================================="
+SCRIPT_EOF
+          
+          chmod +x extract-files.sh
+      
+      - name: Run extraction
+        run: |
+          ./extract-files.sh firmware.zip
+      
+      - name: Generate file list
+        run: |
+          echo "# Extracted Files" > EXTRACTION_SUMMARY.md
+          echo "" >> EXTRACTION_SUMMARY.md
+          echo "## Images" >> EXTRACTION_SUMMARY.md
+          if [[ -f images/kernel ]]; then
+            echo "- kernel: $(du -h images/kernel | cut -f1)" >> EXTRACTION_SUMMARY.md
+          fi
+          if [[ -f images/dtbo.img ]]; then
+            echo "- dtbo.img: $(du -h images/dtbo.img | cut -f1)" >> EXTRACTION_SUMMARY.md
+          fi
+          echo "" >> EXTRACTION_SUMMARY.md
+          
+          echo "## DTBs" >> EXTRACTION_SUMMARY.md
+          if [[ -d images/dtbs ]]; then
+            find images/dtbs -name "*.dtb" -exec basename {} \; | sort | sed 's/^/- /' >> EXTRACTION_SUMMARY.md
+          fi
+          echo "" >> EXTRACTION_SUMMARY.md
+          
+          echo "## Modules" >> EXTRACTION_SUMMARY.md
+          echo "- vendor_boot: $(find modules/vendor_boot -name "*.ko" 2>/dev/null | wc -l) modules" >> EXTRACTION_SUMMARY.md
+          echo "- vendor_dlkm: $(find modules/vendor_dlkm -name "*.ko" 2>/dev/null | wc -l) modules" >> EXTRACTION_SUMMARY.md
+          echo "- system_dlkm: $(find modules/system_dlkm -name "*.ko" 2>/dev/null | wc -l) modules" >> EXTRACTION_SUMMARY.md
+          
+          cat EXTRACTION_SUMMARY.md
+      
+      - name: Upload extracted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-${{ github.event.inputs.device_name }}
+          path: |
+            images/
+            modules/
+            EXTRACTION_SUMMARY.md
+          retention-days: 30
+      
+      - name: Create summary
+        run: |
+          cat EXTRACTION_SUMMARY.md >> $GITHUB_STEP_SUMMARY
