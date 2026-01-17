@@ -3,7 +3,6 @@
 set -e
 
 EXTRACT_OTA=../../../prebuilts/extract-tools/linux-x86/bin/ota_extractor
-EXTRACT_EROFS=../../../prebuilts/erofs-utils/linux-x86/bin/extract.erofs
 MKDTBOIMG=../../../system/libufdt/utils/src/mkdtboimg.py
 UNPACKBOOTIMG=../../../system/tools/mkbootimg/unpack_bootimg.py
 ROM_ZIP=$1
