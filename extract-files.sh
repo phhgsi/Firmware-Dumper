@@ -47,7 +47,8 @@ fi
 
 if [[ ! -f $EXTRACT_EROFS ]]; then
     echo "Missing $EXTRACT_EROFS, please ensure erofs-utils is built and available."
-    exit 1fi
+    exit 1
+fi
 
 if [[ -z $ROM_ZIP ]] || [[ ! -f $ROM_ZIP ]]; then
     usage
